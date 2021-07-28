@@ -2,7 +2,6 @@ package delayed_queue
 
 import (
 	"errors"
-	"fmt"
 	guuid "github.com/google/uuid"
 	"sync"
 	"time"
@@ -10,9 +9,10 @@ import (
 
 var (
 	worker = delayedWorker{
-		queue: map[string]delayedJob{},
-		mutex: sync.RWMutex{},
-		stop:  make(chan bool),
+		queue:       map[string]delayedJob{},
+		mutexQueue:  sync.RWMutex{},
+		mutexTicker: sync.RWMutex{},
+		stop:        make(chan bool),
 	}
 
 	ErrIncorrectDuration = errors.New("incorrect duration")
@@ -20,23 +20,24 @@ var (
 )
 
 type delayedWorker struct {
-	queue  map[string]delayedJob
-	mutex  sync.RWMutex
-	ticker *time.Ticker
-	stop   chan bool
+	queue       map[string]delayedJob
+	mutexQueue  sync.RWMutex
+	ticker      *time.Ticker
+	mutexTicker sync.RWMutex
+	stop        chan bool
 }
 
 func (w *delayedWorker) add(ID string, job delayedJob) {
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
-
+	w.mutexQueue.Lock()
 	w.queue[ID] = job
+	w.mutexQueue.Unlock()
+
 	w.startProcessIfNeeded()
 }
 
 func (w *delayedWorker) remove(jobID string) (bool, error) {
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
+	w.mutexQueue.Lock()
+	defer w.mutexQueue.Unlock()
 
 	if _, exist := w.queue[jobID]; !exist {
 		return false, ErrJobNotExist
@@ -52,15 +53,16 @@ func (w *delayedWorker) remove(jobID string) (bool, error) {
 }
 
 func (w *delayedWorker) loop() {
-	w.mutex.RLock()
+	w.mutexQueue.RLock()
 	IDsForRemoved := make([]string, 0)
 	for jobID, job := range w.queue {
-		if job.RunAt.Before(time.Now()) {
+		now := time.Now()
+		if job.RunAt.Equal(now) || job.RunAt.Before(now) {
 			IDsForRemoved = append(IDsForRemoved, jobID)
 			go job.Callback()
 		}
 	}
-	w.mutex.RUnlock()
+	w.mutexQueue.RUnlock()
 
 	if len(IDsForRemoved) == 0 {
 		return
@@ -72,22 +74,29 @@ func (w *delayedWorker) loop() {
 }
 
 func (w *delayedWorker) startProcessIfNeeded() {
+	w.mutexTicker.RLock()
 	if w.ticker != nil {
+		w.mutexTicker.RUnlock()
 		return
 	}
+	w.mutexTicker.RUnlock()
 
-	w.ticker = time.NewTicker(1 * time.Second)
+	w.mutexTicker.Lock()
+	w.ticker = time.NewTicker(100 * time.Millisecond)
+	w.mutexTicker.Unlock()
+
 	go func() {
 		for {
 			select {
 			case <-w.stop:
+				w.mutexTicker.Lock()
 				w.ticker.Stop()
 				w.ticker = nil
-				fmt.Println("stop")
+				w.mutexTicker.Unlock()
 
 				return
 			case <-w.ticker.C:
-				w.loop()
+				go w.loop()
 			}
 		}
 	}()
