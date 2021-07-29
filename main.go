@@ -10,22 +10,20 @@ import (
 )
 
 func main() {
-	now := time.Now()
-
 	wg := sync.WaitGroup{}
-	sec := 10
-	parallels := 30000
+	sec := 12
+	parallels := 10000
 	problem := 0
-	for i := sec; i > 0; i-- {
+	for i := sec; i > 4; i-- {
 		for j := 1; j <= parallels; j++ {
 			go func(i, j int) {
 				wg.Add(1)
-
+				start := time.Now()
 				delayed_queue.AddJob(time.Duration(i)*time.Second, func() {
-					dur := time.Now().Sub(now)
+					dur := time.Now().Sub(start)
 					if int(dur.Seconds()) != i {
 						problem++
-						fmt.Printf("%d (%d) - %+v run\n", i, j, dur)
+						//fmt.Printf("%d (%d) - %+v run\n", i, j, dur)
 					}
 
 					wg.Done()
@@ -38,7 +36,7 @@ func main() {
 	}
 
 	wg.Wait()
-	all := sec * parallels
-	fmt.Printf("complette (%d * %d = %d, problems: %d (%d))\n", sec, parallels, all, problem, problem*100/all)
+	all := (sec - 5) * parallels
+	fmt.Printf("complette (%d * %d = %d, problems: %d (%d))\n", sec-5, parallels, all, problem, problem*100/all)
 	os.Exit(0)
 }
